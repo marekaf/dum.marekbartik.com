@@ -612,9 +612,17 @@ $('share').addEventListener('click', async () => {
 });
 
 // A place the visitor opens is pushed to the history, so this fires for the back and forward buttons
-// and for a hash typed into the address bar. It must not push again.
+// and for a hash typed into the address bar. It must not push again. The target is read now, because
+// a search that is still in the queue changes the address bar before this lookup starts.
+let navigation = 0;
 window.addEventListener('popstate', () => {
-  run(() => showStart(parseHash(location.hash)));
+  const mine = ++navigation;
+  const hash = location.hash;
+  run(async () => {
+    if (mine !== navigation) return;
+    await showStart(parseHash(hash));
+    if (mine === navigation && location.hash !== hash) history.replaceState(null, '', hash || location.pathname);
+  });
 });
 
 async function showStart(target) {
