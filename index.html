@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Příběh domu: letecký snímek z 50. let a dnes</title>
+<meta name="description" content="Zadejte číslo popisné nebo číslo parcely a podívejte se, jak to místo vypadalo z letadla v 50. letech a jak vypadá dnes.">
+<link rel="stylesheet" href="style.css">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%238a4b1f'/%3E%3Cpath d='M6 17 16 8l10 9v8H6z' fill='%23fffdf9'/%3E%3C/svg%3E">
+</head>
+<body>
+<main>
+
+<header>
+  <h1>Příběh domu</h1>
+  <p class="lead">Najděte svůj dům nebo parcelu a podívejte se, jak to místo vypadalo z letadla v 50. letech a jak vypadá dnes.</p>
+</header>
+
+<section class="card" aria-label="Hledání">
+  <div class="tabs" role="tablist">
+    <button type="button" role="tab" id="tab-house" aria-controls="form-house" aria-selected="true">Podle domu</button>
+    <button type="button" role="tab" id="tab-parcel" aria-controls="form-parcel" aria-selected="false" tabindex="-1">Podle parcely</button>
+  </div>
+
+  <form id="form-house" role="tabpanel" aria-labelledby="tab-house" autocomplete="off">
+    <label class="field">Obec
+      <span class="combo">
+        <input id="house-area" type="text" placeholder="např. Telč" required autocapitalize="words" spellcheck="false" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="house-area-list">
+        <ul id="house-area-list" class="suggest" role="listbox" hidden></ul>
+      </span>
+    </label>
+    <label class="field">Číslo popisné
+      <input id="house-number" type="text" inputmode="numeric" placeholder="např. 223" required>
+    </label>
+    <button class="btn" type="submit">Ukázat</button>
+  </form>
+
+  <form id="form-parcel" role="tabpanel" aria-labelledby="tab-parcel" autocomplete="off" hidden>
+    <label class="field">Katastrální území
+      <span class="combo">
+        <input id="parcel-area" type="text" placeholder="např. Nové Město" required autocapitalize="words" spellcheck="false" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="parcel-area-list">
+        <ul id="parcel-area-list" class="suggest" role="listbox" hidden></ul>
+      </span>
+    </label>
+    <label class="field">Číslo parcely
+      <input id="parcel-number" type="text" placeholder="např. 123/4 nebo st. 56" required>
+    </label>
+    <button class="btn" type="submit">Ukázat</button>
+  </form>
+
+  <p id="status" class="status" role="status" aria-live="polite"></p>
+  <ul id="choices" class="choices" hidden></ul>
+</section>
+
+<section id="result" hidden>
+  <h2 id="result-title"></h2>
+  <div id="stage" class="stage">
+    <div id="layer-today" class="layer"></div>
+    <div id="layer-old" class="layer"></div>
+    <svg id="outline" class="layer" aria-hidden="true"><path id="outline-parcel"/><path id="outline-building"/></svg>
+    <span id="label-old" class="tag tag-left">50. léta</span>
+    <span class="tag tag-right">dnes</span>
+    <div id="handle" class="handle" role="slider" tabindex="0" aria-label="Poměr mezi snímkem z 50. let a dnešním snímkem" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50"><span></span></div>
+    <div class="zoom">
+      <button type="button" id="zoom-in" aria-label="Přiblížit">+</button>
+      <button type="button" id="zoom-out" aria-label="Oddálit">−</button>
+    </div>
+    <span class="credit">© CENIA, © GEODIS BRNO, VGHMÚř Dobruška, © MO ČR · ČÚZK – on-line</span>
+  </div>
+  <p class="hint">Táhněte svislou čárou. Vlevo je snímek z 50. let, vpravo dnešní. Mapu posunete prstem nebo myší.</p>
+  <ul id="facts" class="facts"></ul>
+  <p id="legend" class="hint"></p>
+</section>
+
+<footer>
+  <h2>Odkud jsou snímky a data</h2>
+  <ul>
+    <li><b>Snímek z 50. let:</b> Historická ortofotomapa © CENIA 2010 a © GEODIS BRNO, spol. s r.o. 2010. Podkladové letecké snímky poskytl VGHMÚř Dobruška, © MO ČR 2009. Licence <a href="https://creativecommons.org/licenses/by/4.0/deed.cs" rel="noopener">CC BY 4.0</a>. Snímky jsou převážně z let 1952–1954, někde z let 1937–1970 a 1996. <a href="https://micka.cenia.cz/record/basic/60b09c14-9538-4a0f-a66c-6118c0a80164" rel="noopener">Metadata služby</a>.</li>
+    <li><b>Dnešní snímek:</b> Ortofoto ČR, ČÚZK – on-line. <a href="https://geoportal.gov.cz/php/micka/record/basic/CZ-CUZK-WMS-ORTOFOTO-P" rel="noopener">Metadata služby</a>.</li>
+    <li><b>Parcely, budovy a adresy:</b> RÚIAN, ČÚZK – on-line. <a href="https://geoportal.gov.cz/php/micka/record/basic/CZ-CUZK-AGS-RUIAN" rel="noopener">Metadata služby</a>.</li>
+    <li><a href="https://www.cuzk.gov.cz/Predpisy/Podminky-poskytovani-prostor-dat-a-sitovych-sluzeb/Podminky-poskytovani-sitovych-sluzeb-CUZK.aspx" rel="noopener">Podmínky poskytování síťových služeb ČÚZK</a>.</li>
+  </ul>
+  <p>Obrys parcely je z dnešní katastrální mapy. Snímek z 50. let může být proti němu o několik metrů posunutý.</p>
+  <p>Stránka nic neukládá a nemá žádné měření návštěv. Dotazy posílá váš prohlížeč přímo službám ČÚZK a CENIA.</p>
+</footer>
+
+</main>
+<script type="module" src="app.js"></script>
+</body>
+</html>
