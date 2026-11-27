@@ -61,18 +61,25 @@ function setChoices(items) {
 }
 
 let busy = 0;
-async function run(task) {
+let queue = Promise.resolve();
+
+// Lookups run one after another. Two that overlap can finish in the wrong order, and then the page
+// shows another place than the address bar names.
+function run(task) {
   busy++;
   for (const b of document.querySelectorAll('.btn')) b.disabled = true;
-  try {
-    await task();
-  } catch (error) {
-    console.error(error);
-    const timeout = error.name === 'TimeoutError' || error.name === 'AbortError';
-    setStatus(timeout ? 'Služba ČÚZK neodpověděla včas. Zkuste to prosím za chvíli znovu.' : 'Hledání se nepodařilo. Služba ČÚZK teď možná neběží. Zkuste to prosím za chvíli znovu.', true);
-  } finally {
-    if (--busy === 0) for (const b of document.querySelectorAll('.btn')) b.disabled = false;
-  }
+  queue = queue.then(async () => {
+    try {
+      await task();
+    } catch (error) {
+      console.error(error);
+      const timeout = error.name === 'TimeoutError' || error.name === 'AbortError';
+      setStatus(timeout ? 'Služba ČÚZK neodpověděla včas. Zkuste to prosím za chvíli znovu.' : 'Hledání se nepodařilo. Služba ČÚZK teď možná neběží. Zkuste to prosím za chvíli znovu.', true);
+    } finally {
+      if (--busy === 0) for (const b of document.querySelectorAll('.btn')) b.disabled = false;
+    }
+  });
+  return queue;
 }
 
 class AreaPicker {
