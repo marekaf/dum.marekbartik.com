@@ -164,7 +164,23 @@ export function houseAreaItems({ towns = [], parts = [], areas = [] }, townNames
   return items;
 }
 
+// RÚIAN ties a building to a cadastral area only through the parcel it stands on.
+export function buildingsOnParcels(buildings, parcelIds) {
+  const wanted = new Set(parcelIds.map((id) => Math.round(id)));
+  return buildings.filter((b) => wanted.has(Math.round(b.attributes.identifikacniparcela)));
+}
+
+export function slugify(text) {
+  return foldText(text).replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80).replace(/-+$/, '');
+}
+
+// The number is the RÚIAN id and alone decides what opens. The words after it only make the link readable.
+export function placeHash(kind, id, title) {
+  const slug = slugify(title);
+  return slug ? `${kind}/${id}/${slug}` : `${kind}/${id}`;
+}
+
 export function parseHash(hash) {
-  const m = /^#?(parcela|stavba)=(\d{1,15})$/.exec(hash ?? '');
+  const m = /^#?(parcela|stavba)[=/](\d{1,15})(?:\/[^/]*)?$/.exec(hash ?? '');
   return m ? { kind: m[1], id: m[2] } : null;
 }

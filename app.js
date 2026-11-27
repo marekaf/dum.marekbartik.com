@@ -1,5 +1,5 @@
 import {
-  RESOLUTIONS, bestSuggestion, cadastralAreaItems, fitResolution, houseAreaItems, parcelLabel, parcelWhere, parseHash, parseHouseNumber,
+  RESOLUTIONS, bestSuggestion, buildingsOnParcels, cadastralAreaItems, fitResolution, houseAreaItems, parcelLabel, parcelWhere, parseHash, placeHash, parseHouseNumber,
   parseParcelNumber, ringsBounds, ringsToPath, splitSuggestion, tilesForView, toPixel, viewBounds,
 } from './lib.js';
 
@@ -79,39 +79,64 @@ class AreaPicker {
   constructor(input, list, load) {
     Object.assign(this, { input, list, load, picked: null, items: [], active: -1, timer: 0, serial: 0 });
     input.addEventListener('input', () => this.onInput());
+    input.addEventListener('focus', () => { if (!this.picked && this.list.childElementCount) this.show(); });
     input.addEventListener('keydown', (e) => this.onKey(e));
-    input.addEventListener('blur', () => setTimeout(() => this.close(), 150));
+    input.addEventListener('blur', () => this.close());
+    // Without this the input loses focus on mouse down, and the list closes before the click arrives.
+    list.addEventListener('mousedown', (e) => e.preventDefault());
+    // A pick waits for the click, because a finger that scrolls the list also starts with a touch.
+    list.addEventListener('click', (e) => {
+      const option = e.target.closest('li[role="option"]');
+      if (option) this.pick(this.items[Number(option.dataset.index)]);
+    });
   }
 
   onInput() {
     this.picked = null;
     clearTimeout(this.timer);
+    const serial = ++this.serial;
     const text = this.input.value.trim();
-    if (text.length < 2) return this.close();
+    if (!text) return this.render([], '');
+    if (text.length < 2) return this.render([], 'Napište aspoň 2 písmena.');
+    if (!this.items.length) this.render([], 'Hledám…');
     this.timer = setTimeout(async () => {
-      const serial = ++this.serial;
       try {
         const items = await this.load(text);
-        if (serial === this.serial && document.activeElement === this.input) this.open(items);
+        if (serial === this.serial) this.render(items, items.length ? '' : 'Takový název jsme nenašli. Zkontrolujte ho prosím.');
       } catch (error) {
         console.error(error);
+        if (serial === this.serial) this.render([], 'Seznam se nepodařilo načíst. Zkuste to prosím znovu.');
       }
-    }, 350);
+    }, 200);
   }
 
-  open(items) {
+  render(items, note) {
     this.items = items;
     this.active = -1;
-    this.list.replaceChildren(...items.map((item, i) => {
+    const rows = items.map((item, i) => {
       const li = document.createElement('li');
       li.id = `${this.list.id}-${i}`;
+      li.dataset.index = String(i);
       li.setAttribute('role', 'option');
       li.textContent = item.text;
-      li.addEventListener('pointerdown', (e) => { e.preventDefault(); this.pick(item); });
       return li;
-    }));
-    this.list.hidden = items.length === 0;
-    this.input.setAttribute('aria-expanded', String(items.length > 0));
+    });
+    if (note) {
+      const li = document.createElement('li');
+      li.className = 'note';
+      li.setAttribute('role', 'presentation');
+      li.textContent = note;
+      rows.push(li);
+    }
+    this.list.replaceChildren(...rows);
+    this.input.removeAttribute('aria-activedescendant');
+    if (rows.length && document.activeElement === this.input) this.show();
+    else this.close();
+  }
+
+  show() {
+    this.list.hidden = false;
+    this.input.setAttribute('aria-expanded', 'true');
   }
 
   close() {
@@ -123,16 +148,17 @@ class AreaPicker {
   pick(item) {
     this.picked = item;
     this.input.value = item.text;
+    this.list.replaceChildren();
     this.close();
   }
 
   onKey(e) {
-    if (this.list.hidden) return;
+    if (this.list.hidden || !this.items.length) return;
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault();
       const n = this.items.length;
       this.active = (this.active + (e.key === 'ArrowDown' ? 1 : n - 1) + (this.active < 0 && e.key === 'ArrowUp' ? 1 : 0)) % n;
-      [...this.list.children].forEach((li, i) => li.setAttribute('aria-selected', String(i === this.active)));
+      this.items.forEach((_, i) => this.list.children[i].setAttribute('aria-selected', String(i === this.active)));
       this.input.setAttribute('aria-activedescendant', this.list.children[this.active].id);
       this.list.children[this.active].scrollIntoView({ block: 'nearest' });
     } else if (e.key === 'Enter' && this.active >= 0) {
@@ -154,8 +180,8 @@ class AreaPicker {
       item = bestSuggestion(text, items);
       if (!item) {
         if (items.length) {
-          this.open(items);
           this.input.focus();
+          this.render(items, '');
           setStatus(`Vyberte ${kindName} ze seznamu pod polem.`);
         } else {
           setStatus(`${kindName[0].toUpperCase()}${kindName.slice(1)} „${text}“ jsme nenašli. Zkontrolujte prosím název.`, true);
@@ -199,6 +225,7 @@ const stage = $('stage');
 const view = { cx: 0, cy: 0, res: RESOLUTIONS[1], width: 0, height: 0 };
 let shapes = { parcel: null, building: null };
 let split = 0.5;
+let currentHash = '';
 let todayImage = null;
 let todayTimer = 0;
 let todaySerial = 0;
@@ -363,7 +390,7 @@ function setupStage() {
   setSplit(0.5);
 }
 
-function showPlace({ title, facts, parcelRings, buildingRings, point, hash }) {
+function showPlace({ title, facts, parcelRings, buildingRings, point, hash, push }) {
   $('result').hidden = false;
   $('result-title').textContent = title;
   $('facts').replaceChildren(...facts.filter(Boolean).map((text) => Object.assign(document.createElement('li'), { textContent: text })));
@@ -392,8 +419,11 @@ function showPlace({ title, facts, parcelRings, buildingRings, point, hash }) {
   redraw();
   setStatus('');
   setChoices([]);
-  if (hash && location.hash !== `#${hash}`) history.replaceState(null, '', `#${hash}`);
-  if (hash) $('result').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  currentHash = hash;
+  document.title = `${title} · Příběh domu`;
+  $('share-note').textContent = '';
+  if (push && location.hash !== `#${hash}`) history.pushState(null, '', `#${hash}`);
+  if (push) $('result').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 async function areaName(code) {
@@ -417,19 +447,21 @@ async function findParcels(where) {
   return query(L.parcelPoint, where, PARCEL_FIELDS, true);
 }
 
-async function openParcel(feature, area, updateHash = true) {
+async function openParcel(feature, area, push = true) {
   const a = feature.attributes;
   const name = area ?? await areaName(a.katastralniuzemi);
+  const title = `Parcela ${parcelLabel(a)}, ${name}`;
   showPlace({
-    title: `Parcela ${parcelLabel(a)}, ${name}`,
+    title,
     facts: parcelFacts(a, name),
     parcelRings: feature.geometry?.rings,
     point: feature.geometry,
-    hash: updateHash ? `parcela=${Math.round(a.id)}` : '',
+    hash: placeHash('parcela', Math.round(a.id), title),
+    push,
   });
 }
 
-async function openBuilding(code, updateHash = true) {
+async function openBuilding(code, push = true) {
   const rows = await query(L.building, `kod=${Number(code)}`, 'kod,cisladomovni,identifikacniparcela,typstavebnihoobjektukod,castobce', true);
   if (!rows.length) return setStatus('Tuto budovu už RÚIAN neeviduje.', true);
   const b = rows[0];
@@ -445,13 +477,15 @@ async function openBuilding(code, updateHash = true) {
   const area = parcel ? await areaName(parcel.attributes.katastralniuzemi) : '';
   const point = b.geometry?.rings ? null : (addresses[0]?.geometry ?? parcel?.geometry);
   if (!b.geometry?.rings && !parcel?.geometry?.rings && !point) return setStatus('Pro tuto budovu nemá RÚIAN polohu.', true);
+  const title = addresses[0]?.attributes.adresa ?? `${number}, ${part}`;
   showPlace({
-    title: addresses[0]?.attributes.adresa ?? `${number}, ${part}`,
+    title,
     facts: [`Budova ${number}, část obce ${part}`, ...(parcel ? parcelFacts(parcel.attributes, area) : [])],
     parcelRings: parcel?.geometry?.rings,
     buildingRings: b.geometry?.rings,
     point,
-    hash: updateHash ? `stavba=${a.kod}` : '',
+    hash: placeHash('stavba', a.kod, title),
+    push,
   });
 }
 
@@ -502,8 +536,13 @@ async function searchHouse(picker) {
   if (!parts.length) return setStatus(`Místo ${town.name} nemá v RÚIAN žádnou část obce.`, true);
   const partNames = new Map(parts.map((p) => [p.attributes.kod, p.attributes.nazev]));
   const where = `castobce IN (${[...partNames.keys()].map(Number).join(',')}) AND cisladomovni='${house.number}'${house.registration ? ' AND typstavebnihoobjektukod=2' : ''}`;
-  const buildings = (await query(L.building, where, 'kod,cisladomovni,typstavebnihoobjektukod,castobce'))
-    .sort((x, y) => x.attributes.typstavebnihoobjektukod - y.attributes.typstavebnihoobjektukod);
+  let buildings = await query(L.building, where, 'kod,cisladomovni,typstavebnihoobjektukod,castobce,identifikacniparcela');
+  if (town.kind === 'ku' && buildings.length) {
+    const ids = buildings.map((b) => Math.round(b.attributes.identifikacniparcela)).filter(Boolean);
+    const inArea = ids.length ? await query(L.parcelPoint, `id IN (${ids.join(',')}) AND katastralniuzemi=${Number(town.code)}`, 'id') : [];
+    buildings = buildingsOnParcels(buildings, inArea.map((p) => p.attributes.id));
+  }
+  buildings.sort((x, y) => x.attributes.typstavebnihoobjektukod - y.attributes.typstavebnihoobjektukod);
   if (!buildings.length) return setStatus(`Dům s číslem ${house.number} v místě ${town.name} jsme nenašli.`, true);
   if (buildings.length === 1) return openBuilding(buildings[0].attributes.kod);
 
@@ -518,11 +557,11 @@ async function searchHouse(picker) {
   }).sort((x, y) => x.label.localeCompare(y.label, 'cs')));
 }
 
-async function openFromHash(target, updateHash) {
-  if (target.kind === 'stavba') return openBuilding(target.id, updateHash);
+async function openFromHash(target, push) {
+  if (target.kind === 'stavba') return openBuilding(target.id, push);
   const found = await findParcels(`id=${target.id}`);
   if (!found.length) return setStatus('Tuto parcelu už RÚIAN neeviduje.', true);
-  return openParcel(found[0], undefined, updateHash);
+  return openParcel(found[0], undefined, push);
 }
 
 function setupTabs() {
@@ -554,13 +593,26 @@ const housePicker = new AreaPicker($('house-area'), $('house-area-list'), loadHo
 const parcelPicker = new AreaPicker($('parcel-area'), $('parcel-area-list'), loadCadastralAreas);
 $('form-house').addEventListener('submit', (e) => { e.preventDefault(); run(() => searchHouse(housePicker)); });
 $('form-parcel').addEventListener('submit', (e) => { e.preventDefault(); run(() => searchParcel(parcelPicker)); });
-window.addEventListener('hashchange', () => {
-  const target = parseHash(location.hash);
-  if (target) run(() => openFromHash(target, true));
+$('share').addEventListener('click', async () => {
+  const url = `${location.origin}${location.pathname}#${currentHash}`;
+  try {
+    if (navigator.share) return await navigator.share({ title: document.title, url });
+    await navigator.clipboard.writeText(url);
+    $('share-note').textContent = 'Odkaz zkopírován.';
+  } catch (error) {
+    if (error.name !== 'AbortError') $('share-note').textContent = url;
+  }
 });
 
-const start = parseHash(location.hash);
-run(async () => {
-  await openFromHash(start ?? EXAMPLE, Boolean(start));
-  if (!start) setStatus('Ukázka: Národní divadlo v Praze. Vedle něj dnes stojí Nová scéna, v 50. letech tam byly domy.');
+// A place the visitor opens is pushed to the history, so this fires for the back and forward buttons
+// and for a hash typed into the address bar. It must not push again.
+window.addEventListener('popstate', () => {
+  run(() => showStart(parseHash(location.hash)));
 });
+
+async function showStart(target) {
+  await openFromHash(target ?? EXAMPLE, false);
+  if (!target) setStatus('Ukázka: Národní divadlo v Praze. Vedle něj dnes stojí Nová scéna, v 50. letech tam byly domy.');
+}
+
+run(() => showStart(parseHash(location.hash)));
