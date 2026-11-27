@@ -1,6 +1,6 @@
 import {
-  RESOLUTIONS, bestSuggestion, fitResolution, parcelLabel, parcelWhere, parseHash, parseHouseNumber,
-  parseParcelNumber, ringsBounds, ringsToPath, tilesForView, toPixel, viewBounds,
+  RESOLUTIONS, bestSuggestion, cadastralAreaItems, fitResolution, houseAreaItems, parcelLabel, parcelWhere, parseHash, parseHouseNumber,
+  parseParcelNumber, ringsBounds, ringsToPath, splitSuggestion, tilesForView, toPixel, viewBounds,
 } from './lib.js';
 
 const RUIAN = 'https://ags.cuzk.gov.cz/arcgis/rest/services/RUIAN/Vyhledavaci_sluzba_nad_daty_RUIAN/MapServer';
@@ -76,8 +76,8 @@ async function run(task) {
 }
 
 class AreaPicker {
-  constructor(input, list, table, layer) {
-    Object.assign(this, { input, list, table, layer, picked: null, items: [], active: -1, timer: 0, serial: 0 });
+  constructor(input, list, load) {
+    Object.assign(this, { input, list, load, picked: null, items: [], active: -1, timer: 0, serial: 0 });
     input.addEventListener('input', () => this.onInput());
     input.addEventListener('keydown', (e) => this.onKey(e));
     input.addEventListener('blur', () => setTimeout(() => this.close(), 150));
@@ -91,12 +91,12 @@ class AreaPicker {
     this.timer = setTimeout(async () => {
       const serial = ++this.serial;
       try {
-        const items = await suggest(this.table, text);
+        const items = await this.load(text);
         if (serial === this.serial && document.activeElement === this.input) this.open(items);
       } catch (error) {
         console.error(error);
       }
-    }, 300);
+    }, 350);
   }
 
   open(items) {
@@ -143,14 +143,14 @@ class AreaPicker {
     }
   }
 
-  // Returns { code, name } of the picked area, or null after it showed the visitor what to do.
+  // Returns the picked item, or null after it showed the visitor what to do.
   async resolve(kindName) {
     clearTimeout(this.timer);
     this.serial++;
     let item = this.picked;
     if (!item) {
       const text = this.input.value.trim();
-      const items = text.length >= 2 ? await suggest(this.table, text) : [];
+      const items = text.length >= 2 ? await this.load(text) : [];
       item = bestSuggestion(text, items);
       if (!item) {
         if (items.length) {
@@ -164,10 +164,35 @@ class AreaPicker {
       }
       this.pick(item);
     }
-    const rows = await query(this.layer, `objectid=${Number(item.magicKey)}`, 'kod,nazev');
-    if (!rows.length) throw new Error('area not found by objectid');
-    return { code: rows[0].attributes.kod, name: rows[0].attributes.nazev, text: item.text };
+    return item;
   }
+}
+
+const SUGGEST_LIMIT = 8;
+
+async function suggestedRows(layer, text) {
+  const list = (await suggest(layer, text)).slice(0, SUGGEST_LIMIT);
+  if (!list.length) return [];
+  const found = await query(layer, `objectid IN (${list.map((s) => Number(s.magicKey)).join(',')})`, layer === L.municipality ? 'objectid,kod,nazev' : 'objectid,kod,nazev,obec');
+  const byId = new Map(found.map((f) => [f.attributes.objectid, f.attributes]));
+  return list.flatMap((s) => {
+    const row = byId.get(Number(s.magicKey));
+    return row ? [{ code: row.kod, name: row.nazev, townCode: row.obec, district: splitSuggestion(s.text).district }] : [];
+  });
+}
+
+async function loadHouseAreas(text) {
+  const [towns, parts, areas] = await Promise.all([L.municipality, L.municipalityPart, L.cadastralArea].map((layer) => suggestedRows(layer, text)));
+  const townNames = new Map(towns.map((t) => [t.code, t.name]));
+  const missing = [...new Set([...parts, ...areas].map((r) => r.townCode))].filter((code) => !townNames.has(code));
+  if (missing.length) {
+    for (const f of await query(L.municipality, `kod IN (${missing.map(Number).join(',')})`, 'kod,nazev')) townNames.set(f.attributes.kod, f.attributes.nazev);
+  }
+  return houseAreaItems({ towns, parts, areas }, townNames);
+}
+
+async function loadCadastralAreas(text) {
+  return cadastralAreaItems(await suggest(L.cadastralArea, text));
 }
 
 const stage = $('stage');
@@ -435,11 +460,27 @@ async function searchParcel(picker) {
   const parcel = parseParcelNumber($('parcel-number').value);
   if (!parcel) return setStatus('Číslo parcely zadejte jako 123, 123/4 nebo st. 56.', true);
   setStatus('Hledám parcelu…');
-  const area = await picker.resolve('katastrální území');
-  if (!area) return;
+  const picked = await picker.resolve('katastrální území');
+  if (!picked) return;
+  const rows = await query(L.cadastralArea, `objectid=${Number(picked.magicKey)}`, 'kod,nazev');
+  if (!rows.length) throw new Error('cadastral area not found by objectid');
+  const area = { code: rows[0].attributes.kod, name: rows[0].attributes.nazev };
+  const typed = $('parcel-number').value.trim();
   const found = await findParcels(parcelWhere(area.code, parcel));
   if (!found.length) {
-    return setStatus(`Parcelu ${$('parcel-number').value.trim()} v katastrálním území ${area.name} jsme nenašli. Zkontrolujte číslo za lomítkem. Stavební parcelu zadejte jako „st. 56“.`, true);
+    const missing = `Parcela ${typed} v katastrálním území ${picked.text} podle RÚIAN neexistuje.`;
+    const others = (await loadCadastralAreas(area.name)).filter((o) => o.magicKey !== picked.magicKey);
+    const otherRows = others.length ? await query(L.cadastralArea, `objectid IN (${others.map((o) => Number(o.magicKey)).join(',')})`, 'objectid,kod') : [];
+    const labelOf = new Map(otherRows.map((r) => [r.attributes.kod, others.find((o) => Number(o.magicKey) === r.attributes.objectid)?.text]));
+    const elsewhere = labelOf.size ? await findParcels(parcelWhere([...labelOf.keys()], parcel)) : [];
+    if (!elsewhere.length) {
+      return setStatus(`${missing} Zkontrolujte číslo a katastrální území. Stavební parcelu zadejte jako „st. 56“.`, true);
+    }
+    setStatus(`${missing} Parcela s tímto číslem je v katastrálním území s podobným názvem:`, true);
+    return setChoices(elsewhere.map((f) => ({
+      label: `Parcela ${parcelLabel(f.attributes)}, katastrální území ${labelOf.get(f.attributes.katastralniuzemi)}`,
+      open: () => openParcel(f),
+    })));
   }
   if (found.length === 1) return openParcel(found[0], area.name);
   setStatus('Tomu číslu odpovídá víc parcel. Vyberte jednu:');
@@ -454,21 +495,22 @@ async function searchHouse(picker) {
   const house = parseHouseNumber($('house-number').value);
   if (!house) return setStatus('Číslo popisné zadejte jako číslo, například 223.', true);
   setStatus('Hledám dům…');
-  const town = await picker.resolve('obec');
+  const town = await picker.resolve('obec nebo část obce');
   if (!town) return;
-  const parts = await query(L.municipalityPart, `obec=${Number(town.code)}`, 'kod,nazev');
-  if (!parts.length) return setStatus(`Obec ${town.name} nemá v RÚIAN žádnou část obce.`, true);
+  const partsWhere = town.kind === 'cast' ? `kod=${Number(town.code)}` : `obec=${Number(town.kind === 'ku' ? town.townCode : town.code)}`;
+  const parts = await query(L.municipalityPart, partsWhere, 'kod,nazev');
+  if (!parts.length) return setStatus(`Místo ${town.name} nemá v RÚIAN žádnou část obce.`, true);
   const partNames = new Map(parts.map((p) => [p.attributes.kod, p.attributes.nazev]));
   const where = `castobce IN (${[...partNames.keys()].map(Number).join(',')}) AND cisladomovni='${house.number}'${house.registration ? ' AND typstavebnihoobjektukod=2' : ''}`;
   const buildings = (await query(L.building, where, 'kod,cisladomovni,typstavebnihoobjektukod,castobce'))
     .sort((x, y) => x.attributes.typstavebnihoobjektukod - y.attributes.typstavebnihoobjektukod);
-  if (!buildings.length) return setStatus(`Dům s číslem ${house.number} v obci ${town.name} jsme nenašli.`, true);
+  if (!buildings.length) return setStatus(`Dům s číslem ${house.number} v místě ${town.name} jsme nenašli.`, true);
   if (buildings.length === 1) return openBuilding(buildings[0].attributes.kod);
 
   const shown = buildings.slice(0, 60);
   const addresses = await query(L.address, `stavebniobjekt IN (${shown.map((b) => b.attributes.kod).join(',')})`, 'stavebniobjekt,adresa');
   const addressOf = new Map(addresses.map((r) => [r.attributes.stavebniobjekt, r.attributes.adresa]));
-  setStatus(`V obci ${town.name} je víc domů s číslem ${house.number}. Vyberte jeden:`);
+  setStatus(`V místě ${town.name} je víc domů s číslem ${house.number}. Vyberte jeden:`);
   setChoices(shown.map((b) => {
     const a = b.attributes;
     const fallback = `${a.typstavebnihoobjektukod === 2 ? 'č.ev.' : 'č.p.'} ${a.cisladomovni}, ${partNames.get(a.castobce) ?? ''}`;
@@ -508,8 +550,8 @@ function setupTabs() {
 
 setupTabs();
 setupStage();
-const housePicker = new AreaPicker($('house-area'), $('house-area-list'), L.municipality, L.municipality);
-const parcelPicker = new AreaPicker($('parcel-area'), $('parcel-area-list'), L.cadastralArea, L.cadastralArea);
+const housePicker = new AreaPicker($('house-area'), $('house-area-list'), loadHouseAreas);
+const parcelPicker = new AreaPicker($('parcel-area'), $('parcel-area-list'), loadCadastralAreas);
 $('form-house').addEventListener('submit', (e) => { e.preventDefault(); run(() => searchHouse(housePicker)); });
 $('form-parcel').addEventListener('submit', (e) => { e.preventDefault(); run(() => searchParcel(parcelPicker)); });
 window.addEventListener('hashchange', () => {

@@ -99,7 +99,7 @@ export function parseHouseNumber(text) {
 
 export function parcelWhere(areaCode, parcel) {
   const parts = [
-    `katastralniuzemi=${Number(areaCode)}`,
+    Array.isArray(areaCode) ? `katastralniuzemi IN (${areaCode.map(Number).join(',')})` : `katastralniuzemi=${Number(areaCode)}`,
     `kmenovecislo=${Number(parcel.base)}`,
     parcel.sub === null ? 'poddelenicisla IS NULL' : `poddelenicisla=${Number(parcel.sub)}`,
   ];
@@ -123,8 +123,45 @@ export function bestSuggestion(typed, suggestions) {
   const want = foldText(typed);
   const names = suggestions.map((s) => foldText(s.text));
   let hits = suggestions.filter((_, i) => names[i] === want);
-  if (!hits.length) hits = suggestions.filter((_, i) => names[i].replace(/\s*\(.*\)$/, '') === want);
+  if (!hits.length) hits = suggestions.filter((s, i) => (s.name ? foldText(s.name) : names[i].replace(/\s*\(.*\)$/, '')) === want);
   return hits.length === 1 ? hits[0] : null;
+}
+
+// The geocoder writes a suggestion as "Name (District)", and as "Name" alone inside Prague.
+export function splitSuggestion(text) {
+  const m = /^(.*?)\s*\(([^()]*)\)\s*$/.exec(text ?? '');
+  return m ? { name: m[1].trim(), district: m[2].trim() } : { name: (text ?? '').trim(), district: '' };
+}
+
+// magicKey is the row id of the cadastral area. It goes into the lookup, because several areas
+// share one name and differ only by district.
+export function cadastralAreaItems(suggestions) {
+  return suggestions.map((s) => {
+    const { name, district } = splitSuggestion(s.text);
+    return { magicKey: s.magicKey, name, district, text: district ? `${name} (okres ${district})` : name };
+  });
+}
+
+// Builds the one list a visitor picks a place from in the house search. A part of a municipality
+// and a cadastral area usually repeat the name of the place above them, so a row is dropped when
+// a row above it already covers the same houses under the same name.
+// towns: [{ code, name, district }], parts and areas: [{ code, name, district, townCode }].
+export function houseAreaItems({ towns = [], parts = [], areas = [] }, townNames = new Map()) {
+  const district = (d) => (d ? ` (okres ${d})` : '');
+  const key = (townCode, name) => `${townCode}|${foldText(name)}`;
+  const covered = new Set(towns.map((t) => key(t.code, t.name)));
+  const items = towns.map((t) => ({ kind: 'obec', code: t.code, name: t.name, text: `${t.name}${district(t.district)}` }));
+  for (const p of parts) {
+    if (covered.has(key(p.townCode, p.name))) continue;
+    covered.add(key(p.townCode, p.name));
+    items.push({ kind: 'cast', code: p.code, name: p.name, text: `${p.name}, část obce ${townNames.get(p.townCode) ?? '?'}${district(p.district)}` });
+  }
+  for (const a of areas) {
+    if (covered.has(key(a.townCode, a.name))) continue;
+    covered.add(key(a.townCode, a.name));
+    items.push({ kind: 'ku', code: a.code, townCode: a.townCode, name: a.name, text: `${a.name}, katastrální území v obci ${townNames.get(a.townCode) ?? '?'}${district(a.district)}` });
+  }
+  return items;
 }
 
 export function parseHash(hash) {
