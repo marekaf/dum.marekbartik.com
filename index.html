@@ -25,7 +25,7 @@
   <form id="form-house" role="tabpanel" aria-labelledby="tab-house" autocomplete="off">
     <label class="field">Obec nebo část obce
       <span class="combo">
-        <input id="house-area" type="text" placeholder="např. Telč" required autocapitalize="words" spellcheck="false" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="house-area-list">
+        <input id="house-area" type="text" placeholder="Začněte psát, např. Telč" required autocapitalize="words" spellcheck="false" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="house-area-list">
         <ul id="house-area-list" class="suggest" role="listbox" hidden></ul>
       </span>
     </label>
@@ -38,7 +38,7 @@
   <form id="form-parcel" role="tabpanel" aria-labelledby="tab-parcel" autocomplete="off" hidden>
     <label class="field">Katastrální území
       <span class="combo">
-        <input id="parcel-area" type="text" placeholder="např. Nové Město" required autocapitalize="words" spellcheck="false" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="parcel-area-list">
+        <input id="parcel-area" type="text" placeholder="Začněte psát, např. Nové Město" required autocapitalize="words" spellcheck="false" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="parcel-area-list">
         <ul id="parcel-area-list" class="suggest" role="listbox" hidden></ul>
       </span>
     </label>
@@ -70,6 +70,7 @@
   <p class="hint">Táhněte svislou čárou. Vlevo je snímek z 50. let, vpravo dnešní. Mapu posunete prstem nebo myší.</p>
   <ul id="facts" class="facts"></ul>
   <p id="legend" class="hint"></p>
+  <p class="share"><button type="button" id="share" class="btn-quiet">Sdílet</button> <span id="share-note" class="hint" role="status"></span></p>
 </section>
 
 <footer>

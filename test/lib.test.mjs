@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  bestSuggestion, cadastralAreaItems, fitResolution, foldText, houseAreaItems, parcelLabel, parcelWhere, parseHash, parseHouseNumber,
-  parseParcelNumber, RESOLUTIONS, ringsBounds, ringsToPath, splitSuggestion, tileLevel, tilesForView, toPixel,
+  bestSuggestion, buildingsOnParcels, cadastralAreaItems, fitResolution, foldText, houseAreaItems, parcelLabel, parcelWhere, parseHash, placeHash, parseHouseNumber,
+  parseParcelNumber, RESOLUTIONS, ringsBounds, ringsToPath, slugify, splitSuggestion, tileLevel, tilesForView, toPixel,
 } from '../lib.js';
 
 test('tile level follows the view resolution and the pixel ratio', () => {
@@ -152,4 +152,25 @@ test('two cadastral areas with one name stay apart and keep their own id', () =>
   assert.equal(bestSuggestion('Lhota (okres Zlín)', items).magicKey, '22');
   assert.equal(bestSuggestion('lhota u vsi', items).magicKey, '33');
   assert.equal(bestSuggestion('josefov', items).magicKey, '44');
+});
+
+test('a picked cadastral area keeps only the buildings on its parcels', () => {
+  const buildings = [
+    { attributes: { kod: 1, identifikacniparcela: 2070575101.0 } },
+    { attributes: { kod: 2, identifikacniparcela: 555 } },
+    { attributes: { kod: 3, identifikacniparcela: null } },
+  ];
+  assert.deepEqual(buildingsOnParcels(buildings, [2070575101]).map((b) => b.attributes.kod), [1]);
+  assert.deepEqual(buildingsOnParcels(buildings, []), []);
+});
+
+test('a link holds the id and readable words, and opens by the id alone', () => {
+  assert.equal(slugify('Národní 223/2, Nové Město, 11000 Praha 1'), 'narodni-223-2-nove-mesto-11000-praha-1');
+  assert.equal(placeHash('stavba', 21652228, 'Národní 223/2, Praha 1'), 'stavba/21652228/narodni-223-2-praha-1');
+  assert.equal(placeHash('parcela', 5, ''), 'parcela/5');
+  assert.deepEqual(parseHash('#stavba/21652228/narodni-223-2-praha-1'), { kind: 'stavba', id: '21652228' });
+  assert.deepEqual(parseHash('#parcela/2070575101'), { kind: 'parcela', id: '2070575101' });
+  assert.deepEqual(parseHash('#stavba/21652228/anything%20else'), { kind: 'stavba', id: '21652228' });
+  assert.equal(parseHash('#stavba/abc'), null);
+  assert.equal(parseHash('#stavba/1/a/b'), null);
 });
