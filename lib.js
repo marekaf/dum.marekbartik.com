@@ -116,13 +116,15 @@ export function foldText(text) {
   return (text ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
 }
 
+// Returns a suggestion only when the typed text points at exactly one. Many names repeat across
+// districts ("Nová Ves (Liberec)", "Nová Ves (Brno-venkov)"), and a guess would show another village.
 export function bestSuggestion(typed, suggestions) {
+  if (suggestions.length === 1) return suggestions[0];
   const want = foldText(typed);
   const names = suggestions.map((s) => foldText(s.text));
-  let i = names.indexOf(want);
-  if (i < 0) i = names.findIndex((n) => n.replace(/\s*\(.*\)$/, '') === want);
-  if (i < 0) i = suggestions.length === 1 ? 0 : -1;
-  return i < 0 ? null : suggestions[i];
+  let hits = suggestions.filter((_, i) => names[i] === want);
+  if (!hits.length) hits = suggestions.filter((_, i) => names[i].replace(/\s*\(.*\)$/, '') === want);
+  return hits.length === 1 ? hits[0] : null;
 }
 
 export function parseHash(hash) {

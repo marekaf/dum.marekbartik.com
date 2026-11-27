@@ -87,6 +87,10 @@ test('suggestion match ignores accents, case and the district in brackets', () =
   assert.equal(bestSuggestion('telc', list).text, 'Telč (Jihlava)');
   assert.equal(bestSuggestion('nove', list), null);
   assert.equal(bestSuggestion('x', [{ text: 'Xaverov' }]).text, 'Xaverov');
+  const twins = [{ text: 'Nová Ves (Liberec)' }, { text: 'Nová Ves (Brno-venkov)' }];
+  assert.equal(bestSuggestion('Nová Ves', twins), null);
+  assert.equal(bestSuggestion('Nová Ves', [...twins].reverse()), null);
+  assert.equal(bestSuggestion('nova ves (liberec)', twins).text, 'Nová Ves (Liberec)');
 });
 
 test('hash', () => {
