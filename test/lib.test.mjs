@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  bestSuggestion, fitResolution, foldText, parcelLabel, parcelWhere, parseHash, parseHouseNumber,
-  parseParcelNumber, RESOLUTIONS, ringsBounds, ringsToPath, tileLevel, tilesForView, toPixel,
+  bestSuggestion, cadastralAreaItems, fitResolution, foldText, houseAreaItems, parcelLabel, parcelWhere, parseHash, parseHouseNumber,
+  parseParcelNumber, RESOLUTIONS, ringsBounds, ringsToPath, splitSuggestion, tileLevel, tilesForView, toPixel,
 } from '../lib.js';
 
 test('tile level follows the view resolution and the pixel ratio', () => {
@@ -72,6 +72,7 @@ test('house numbers', () => {
 
 test('parcel query text holds numbers only', () => {
   assert.equal(parcelWhere(727181, { building: false, base: 160, sub: 1 }), 'katastralniuzemi=727181 AND kmenovecislo=160 AND poddelenicisla=1');
+  assert.equal(parcelWhere([1, '2'], { building: false, base: 7, sub: 3 }), 'katastralniuzemi IN (1,2) AND kmenovecislo=7 AND poddelenicisla=3');
   assert.equal(parcelWhere('727181', { building: true, base: 5, sub: null }), 'katastralniuzemi=727181 AND kmenovecislo=5 AND poddelenicisla IS NULL AND druhcislovanikod=1');
 });
 
@@ -98,4 +99,57 @@ test('hash', () => {
   assert.deepEqual(parseHash('#parcela=2070575101'), { kind: 'parcela', id: '2070575101' });
   assert.equal(parseHash('#stavba=1 OR 1=1'), null);
   assert.equal(parseHash(''), null);
+});
+
+test('suggestion text splits into name and district', () => {
+  assert.deepEqual(splitSuggestion('Telč-Štěpnice (Jihlava)'), { name: 'Telč-Štěpnice', district: 'Jihlava' });
+  assert.deepEqual(splitSuggestion('Nové Město'), { name: 'Nové Město', district: '' });
+});
+
+test('a name that is only a part of a municipality is offered and picked', () => {
+  const townNames = new Map([[588024, 'Telč']]);
+  const items = houseAreaItems({
+    towns: [],
+    parts: [{ code: 413425, name: 'Telč-Štěpnice', district: 'Jihlava', townCode: 588024 }],
+    areas: [],
+  }, townNames);
+  assert.deepEqual(items, [{ kind: 'cast', code: 413425, name: 'Telč-Štěpnice', text: 'Telč-Štěpnice, část obce Telč (okres Jihlava)' }]);
+  assert.equal(bestSuggestion('stepnice', items).code, 413425);
+});
+
+test('a part and a cadastral area with the name of the place above them are not repeated', () => {
+  const townNames = new Map([[1, 'Lhota'], [2, 'Velká Ves']]);
+  const items = houseAreaItems({
+    towns: [{ code: 1, name: 'Lhota', district: 'Kladno' }],
+    parts: [
+      { code: 11, name: 'Lhota', district: 'Kladno', townCode: 1 },
+      { code: 21, name: 'Lhota', district: 'Kladno', townCode: 2 },
+    ],
+    areas: [
+      { code: 101, name: 'Lhota', district: 'Kladno', townCode: 1 },
+      { code: 201, name: 'Lhota', district: 'Kladno', townCode: 2 },
+      { code: 202, name: 'Lhota u Vsi', district: 'Kladno', townCode: 2 },
+    ],
+  }, townNames);
+  assert.deepEqual(items.map((i) => i.text), [
+    'Lhota (okres Kladno)',
+    'Lhota, část obce Velká Ves (okres Kladno)',
+    'Lhota u Vsi, katastrální území v obci Velká Ves (okres Kladno)',
+  ]);
+  assert.equal(bestSuggestion('lhota', items), null);
+  assert.equal(bestSuggestion('LHOTA U VSI', items).kind, 'ku');
+});
+
+test('two cadastral areas with one name stay apart and keep their own id', () => {
+  const items = cadastralAreaItems([
+    { text: 'Lhota (Kladno)', magicKey: '11' },
+    { text: 'Lhota (Zlín)', magicKey: '22' },
+    { text: 'Lhota u Vsi (Kladno)', magicKey: '33' },
+    { text: 'Josefov', magicKey: '44' },
+  ]);
+  assert.deepEqual(items.map((i) => i.text), ['Lhota (okres Kladno)', 'Lhota (okres Zlín)', 'Lhota u Vsi (okres Kladno)', 'Josefov']);
+  assert.equal(bestSuggestion('lhota', items), null);
+  assert.equal(bestSuggestion('Lhota (okres Zlín)', items).magicKey, '22');
+  assert.equal(bestSuggestion('lhota u vsi', items).magicKey, '33');
+  assert.equal(bestSuggestion('josefov', items).magicKey, '44');
 });
